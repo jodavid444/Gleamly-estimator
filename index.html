@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gleamly Instant Estimate</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+
+<div class="container">
+  <div class="wizard">
+
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="progress-text" id="progressText">Choose your service</div>
+
+    <section class="step active" id="stepContainer"></section>
+
+  </div>
+</div>
+
+<button id="adminToggle" title="Admin settings" aria-label="Admin settings">⚙</button>
+
+<div id="adminModal" class="modal-overlay" hidden>
+  <div class="modal">
+    <button class="modal-close" id="adminClose" aria-label="Close">✕</button>
+    <h2>Pricing admin</h2>
+    <p>Adjust rates, labour hours, multipliers and Restore prices. Changes are saved in this browser and apply immediately — no code changes needed.</p>
+    <div id="adminFields"></div>
+    <div class="modal-buttons">
+      <button id="adminReset" class="back" type="button">Reset to defaults</button>
+      <button id="adminSave" class="next" type="button">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
