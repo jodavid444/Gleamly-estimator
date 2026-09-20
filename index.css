@@ -14,13 +14,17 @@ html{
 
 body{
     font-family: 'Poppins', sans-serif;
-    background:#f3f7f5;
+    background:#E8F0F7;
     color:#1b1b1b;
     display:flex;
     justify-content:center;
     align-items:center;
     min-height:100vh;
     padding:40px;
+}
+
+a{
+    color:#1864AB;
 }
 
 /* ===========================
@@ -45,13 +49,13 @@ PROGRESS
 
 .progress-container{
     height:8px;
-    background:#edf2ef;
+    background:#E8F0F7;
 }
 
 .progress-bar{
     width:14%;
     height:100%;
-    background:#22c55e;
+    background:#1864AB;
     transition:.4s;
 }
 
@@ -116,16 +120,17 @@ ICON
     width:90px;
     height:90px;
     margin:0 auto 10px;
-    background:#22c55e;
+    background:#E8F0F7;
     border-radius:50%;
     display:flex;
     justify-content:center;
     align-items:center;
-    font-size:42px;
 }
 
-.bespoke-icon{
-    background:#111827;
+.logo-icon{
+    width:46px;
+    height:46px;
+    object-fit:contain;
 }
 
 /* ===========================
@@ -144,14 +149,14 @@ button{
     margin-top:35px;
     padding:18px;
     border-radius:14px;
-    background:#22c55e;
+    background:#1864AB;
     color:white;
     font-size:17px;
     font-weight:600;
 }
 
 .next:hover{
-    background:#16a34a;
+    opacity:.9;
 }
 
 .buttons{
@@ -163,13 +168,13 @@ button{
 .back{
     width:170px;
     border-radius:14px;
-    background:#edf2ef;
-    color:#1f2937;
+    background:#E8F0F7;
+    color:#1864AB;
     font-weight:600;
 }
 
 .back:hover{
-    background:#dfe7e3;
+    opacity:.85;
 }
 
 .buttons button:last-child{
@@ -223,8 +228,8 @@ CARDS (service / property type / bedrooms / yes-no)
 }
 
 .cards input:checked+.card-option{
-    background:#22c55e;
-    border-color:#22c55e;
+    background:#1864AB;
+    border-color:#1864AB;
     color:white;
     transform:translateY(-3px);
 }
@@ -269,8 +274,8 @@ CONDITION LIST
 }
 
 .condition-list input:checked+.condition-option{
-    border-color:#22c55e;
-    background:#f0fdf4;
+    border-color:#1864AB;
+    background:#E8F0F7;
 }
 
 /* ===========================
@@ -308,7 +313,7 @@ COUNTERS
     width:60px;
     height:60px;
     border-radius:50%;
-    background:#22c55e;
+    background:#1864AB;
     color:white;
     font-size:30px;
 }
@@ -378,7 +383,25 @@ input:focus,
 select:focus,
 textarea:focus{
     outline:none;
-    border-color:#22c55e;
+    border-color:#1864AB;
+}
+
+input[type=file]{
+    width:100%;
+    padding:10px 0;
+    font-size:13px;
+    border:none;
+}
+
+.info-note{
+    background:#E8F0F7;
+    color:#1864AB;
+    padding:10px 14px;
+    border-radius:10px;
+    font-size:12.5px;
+    margin-top:-6px;
+    margin-bottom:14px;
+    text-align:left;
 }
 
 textarea{
@@ -422,7 +445,7 @@ SUMMARY BOX
 =========================== */
 
 .summary-box{
-    background:#f3f7f5;
+    background:#E8F0F7;
     border-radius:16px;
     padding:20px 22px;
     margin-bottom:28px;
@@ -450,13 +473,48 @@ SUMMARY BOX
     color:#111827;
 }
 
+.summary-edit-btn{
+    background:none;
+    border:none;
+    color:#1864AB;
+    font-weight:600;
+    font-size:11.5px;
+    cursor:pointer;
+    text-decoration:underline;
+    padding:0;
+    margin-left:8px;
+}
+
+.photo-preview{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-top:10px;
+}
+
+.photo-thumb{
+    width:64px;
+    height:64px;
+    border-radius:10px;
+    overflow:hidden;
+    background:#E8F0F7;
+    border:2px solid #E8F0F7;
+}
+
+.photo-thumb img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:block;
+}
+
 /* ===========================
 RESULT
 =========================== */
 
 .price{
     font-size:56px;
-    color:#22c55e;
+    color:#1864AB;
     font-weight:800;
     margin:30px 0;
     text-align:center;

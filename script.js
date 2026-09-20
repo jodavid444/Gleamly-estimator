@@ -83,10 +83,10 @@ let CONFIG = loadConfig();
 // -------------------------------
 
 const SERVICE_META = {
-    reset:     { name: 'Gleamly Reset', desc: 'Regular maintenance clean for a home that’s already reasonably kept.' },
+    reset:     { name: 'Gleamly Reset', desc: 'A detailed one-off deep or spring clean for homes needing a thorough reset.' },
     resetPlus: { name: 'Reset Plus',    desc: 'Move-in / move-out & end-of-tenancy deep clean.' },
     abc:       { name: 'ABC',           desc: 'After-builders / post-construction clean.' },
-    restore:   { name: 'Restore',       desc: 'Carpet & flooring area cleaning.' }
+    restore:   { name: 'Restore',       desc: 'Professional carpet cleaning for bedrooms and other carpeted areas.' }
 };
 
 const CONDITION_META = {
@@ -149,11 +149,10 @@ function freshState(){
         bespokeReason: null,
         lastEnquiryId: null,
         stage2: {
-            name: '', mobile: '', email: '', postcode: '', preferredDate: '',
-            bedroomsExact: '', bathroomsExact: '', wcsExact: '',
-            livingRooms: 1, diningRooms: 0, officeRooms: 0, utilityRooms: 0, otherRooms: 0,
+            name: '', mobile: '', email: '', postcode: '',
+            preferredDateOption: '', preferredDate: '',
             furnished: '', floor: '', accessType: '', accessRestrictions: '', parking: '',
-            problemAreas: '', anythingElse: '',
+            problemAreas: '',
             abcExtent: '', abcTradesFinished: '', abcResidueNotes: '',
             consent: false
         }
@@ -163,6 +162,8 @@ function freshState(){
 let state = freshState();
 let stepHistory = ['service'];
 let analyticsFlags = {};
+let editMode = false;
+let selectedPhotos = [];
 
 function getStateValue(path){ return getByPath(state, path); }
 function setStateValue(path, value){ setByPath(state, path, value); }
@@ -320,14 +321,37 @@ function textField(path, label, opts){
     </div>`;
 }
 
-function selectField(path, label, options){
+function selectField(path, label, options, opts){
+    opts = opts || {};
+    const required = !!opts.required;
     const value = getStateValue(path) || '';
     return `<div class="form-group">
-        <label>${escapeHTML(label)}</label>
+        <label>${escapeHTML(label)}${required ? ' *' : ''}</label>
         <select data-path="${path}">
             ${options.map(o => `<option value="${escapeHTML(o)}" ${o === value ? 'selected' : ''}>${o === '' ? 'Select…' : escapeHTML(o)}</option>`).join('')}
         </select>
     </div>`;
+}
+
+// -------------------------------
+// Logo (replaces prototype emoji icons)
+// -------------------------------
+
+function logoIcon(){
+    return `<img src="assets/gleamly-logo.png" alt="Gleamly" class="logo-icon">`;
+}
+
+// -------------------------------
+// Photo uploads (final quote stage)
+// -------------------------------
+
+function renderPhotoPreview(){
+    if(!selectedPhotos.length) return '';
+    return selectedPhotos.map(f => `<div class="photo-thumb"><img src="${URL.createObjectURL(f)}" alt="${escapeHTML(f.name)}"></div>`).join('');
+}
+function renderPhotoPreviewInto(){
+    const el = stepContainer.querySelector('#photoPreview');
+    if(el) el.innerHTML = renderPhotoPreview();
 }
 
 function textareaField(path, label){
@@ -342,19 +366,37 @@ function textareaField(path, label){
 // Summary of Stage 1 answers, carried into Stage 2 automatically
 // -------------------------------
 
+function summaryRow(label, value, editStep){
+    const editBtn = editStep ? `<button type="button" class="summary-edit-btn" data-action="edit-answer" data-target-step="${editStep}">Edit</button>` : '';
+    return `<li><strong>${label}:</strong> ${value}${editBtn}</li>`;
+}
+
 function summaryHTML(){
     const rows = [];
-    rows.push(['Service', escapeHTML(SERVICE_META[state.service].name)]);
+    rows.push(summaryRow('Service', escapeHTML(SERVICE_META[state.service].name)));
 
     if(state.service !== 'restore'){
-        rows.push(['Property type', state.propertyType === 'house' ? 'House' : 'Flat/Apartment']);
-        rows.push(['Bedrooms', BEDROOM_LABELS[state.bedroomsOption] || '—']);
+        rows.push(summaryRow('Property type', state.propertyType === 'house' ? 'House' : 'Flat/Apartment', 'propertyType'));
+        rows.push(summaryRow('Bedrooms', BEDROOM_LABELS[state.bedroomsOption] || '—', 'bedrooms'));
         if(state.bedroomsOption !== '5+'){
-            rows.push(['Bathrooms', state.bathrooms]);
-            rows.push(['Separate WCs', state.wcs]);
+            const stairs = state.stairsFlights || 0;
+            rows.push(summaryRow(
+                'Bathrooms &amp; WCs',
+                `${state.bathrooms} bathroom${state.bathrooms === 1 ? '' : 's'}, ${state.wcs} WC${state.wcs === 1 ? '' : 's'}, ${stairs} internal staircase${stairs === 1 ? '' : 's'}`,
+                'bathrooms'
+            ));
+
+            const r = state.additionalRooms;
+            const roomParts = [];
+            if(r.dining) roomParts.push(`${r.dining} dining`);
+            if(r.office) roomParts.push(`${r.office} office`);
+            if(r.utility) roomParts.push(`${r.utility} utility`);
+            if(r.other) roomParts.push(`${r.other} other`);
+            rows.push(summaryRow('Additional rooms', roomParts.join(', ') || 'None', 'additionalRooms'));
+
             if(state.condition){
                 const meta = state.service === 'abc' ? ABC_CONDITION_META : CONDITION_META;
-                rows.push(['Condition', escapeHTML(meta[state.condition].title)]);
+                rows.push(summaryRow('Condition', escapeHTML(meta[state.condition].title), 'condition'));
             }
         }
     } else {
@@ -366,19 +408,19 @@ function summaryHTML(){
         if(a.hallway) parts.push(`${a.hallway} hallway`);
         if(a.landing) parts.push(`${a.landing} landing`);
         if(a.stairsSteps) parts.push(`${a.stairsSteps} stair steps`);
-        rows.push(['Areas selected', parts.join(', ') || '—']);
-        rows.push(['Stains / concerns', state.stains === 'yes' ? 'Yes' : 'No']);
+        rows.push(summaryRow('Areas selected', parts.join(', ') || '—', 'restoreAreas'));
+        rows.push(summaryRow('Stains / concerns', state.stains === 'yes' ? 'Yes' : 'No', 'restoreConcern'));
     }
 
     if(state.service === 'restore'){
-        rows.push(['Estimated price', `£${state.restoreEstimate || 0}`]);
+        rows.push(summaryRow('Estimated price', `£${state.restoreEstimate || 0}`));
     } else if(state.bespokeReason){
-        rows.push(['Estimated price', 'Bespoke — to be confirmed']);
+        rows.push(summaryRow('Estimated price', 'Bespoke — to be confirmed'));
     } else if(state.estimate){
-        rows.push(['Estimated price', `£${state.estimate.from} — £${state.estimate.to}`]);
+        rows.push(summaryRow('Estimated price', `£${state.estimate.from} — £${state.estimate.to}`));
     }
 
-    return `<div class="summary-box"><h3>Your answers so far</h3><ul>${rows.map(([k, v]) => `<li><strong>${k}:</strong> ${v}</li>`).join('')}</ul></div>`;
+    return `<div class="summary-box"><h3>Your answers so far</h3><ul>${rows.join('')}</ul></div>`;
 }
 
 function bespokeMessage(){
@@ -395,9 +437,9 @@ function bespokeMessage(){
 const TEMPLATES = {
 
     service: () => `
-        <div class="hero-icon">🧹</div>
+        <div class="hero-icon">${logoIcon()}</div>
         <h1>Gleamly Instant Estimate</h1>
-        <p>Get an instant price range in about a minute — no contact details needed yet.</p>
+        <p>Get an instant price range in about a minute — no contact details needed.</p>
         <div class="form-errors" id="formErrors" hidden></div>
         <div class="cards cols-2">
             ${Object.entries(SERVICE_META).map(([key, meta]) => `
@@ -436,13 +478,14 @@ const TEMPLATES = {
         <div class="form-errors" id="formErrors" hidden></div>
         ${counterRow('bathrooms', 'Bathrooms', { min: 1, max: 10 })}
         ${counterRow('wcs', 'Separate WCs', { min: 0, max: 10, hint: 'A WC with no bath or shower.' })}
-        ${state.propertyType === 'house' ? counterRow('stairsFlights', 'Staircases', { min: 0, max: 5, hint: 'Internal staircases in the property.' }) : ''}
+        ${counterRow('stairsFlights', 'Internal staircase', { min: 0, max: 5, hint: 'Internal staircases within the property.' })}
         <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Continue</button></div>
     `,
 
     additionalRooms: () => `
         <h2>Any additional rooms?</h2>
         <p>Leave at 0 if not applicable.</p>
+        <p>The instant estimate assumes one kitchen and one living space.</p>
         ${counterRow('additionalRooms.dining', 'Dining / additional reception room')}
         ${counterRow('additionalRooms.office', 'Office / study')}
         ${counterRow('additionalRooms.utility', 'Utility room')}
@@ -495,7 +538,7 @@ const TEMPLATES = {
     `,
 
     bespoke: () => `
-        <div class="bespoke-icon">📝</div>
+        <div class="bespoke-icon">${logoIcon()}</div>
         <h2>We'll prepare a bespoke estimate</h2>
         <p>${escapeHTML(bespokeMessage())}</p>
         <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Continue to bespoke quote form</button></div>
@@ -527,6 +570,8 @@ const TEMPLATES = {
         <div class="form-errors" id="formErrors" hidden></div>
         ${summaryHTML()}
 
+        <p class="hint" style="text-align:left;">By entering your contact details below you agree to our <a href="#privacy-notice" target="_blank" rel="noopener">Privacy Notice</a>.</p>
+
         <div class="form-row">
             ${textField('stage2.name', 'Full name', { required: true })}
             ${textField('stage2.mobile', 'Mobile number', { type: 'tel', required: true })}
@@ -535,19 +580,22 @@ const TEMPLATES = {
             ${textField('stage2.email', 'Email', { type: 'email', required: true })}
             ${textField('stage2.postcode', 'Property postcode', { required: true })}
         </div>
-        ${textField('stage2.preferredDate', 'Preferred cleaning date', { type: 'date', required: true })}
+
+        <div class="form-group">
+            <label>Preferred cleaning date *</label>
+            <select data-path="stage2.preferredDateOption">
+                <option value="">Select…</option>
+                <option value="date" ${state.stage2.preferredDateOption === 'date' ? 'selected' : ''}>Choose a date</option>
+                <option value="flexible" ${state.stage2.preferredDateOption === 'flexible' ? 'selected' : ''}>Flexible</option>
+                <option value="undecided" ${state.stage2.preferredDateOption === 'undecided' ? 'selected' : ''}>Not decided yet</option>
+            </select>
+        </div>
+        <div class="form-group" id="preferredDateGroup" ${state.stage2.preferredDateOption === 'date' ? '' : 'hidden'}>
+            <label>Date</label>
+            <input type="date" data-path="stage2.preferredDate" value="${escapeHTML(state.stage2.preferredDate || '')}">
+        </div>
 
         ${state.service !== 'restore' ? `
-            <div class="form-row">
-                ${numberField('stage2.bedroomsExact', 'Exact number of bedrooms', { min: 0, max: 20 })}
-                ${numberField('stage2.bathroomsExact', 'Exact number of bathrooms', { min: 0, max: 20 })}
-            </div>
-            ${numberField('stage2.wcsExact', 'Exact number of separate WCs', { min: 0, max: 20 })}
-            ${counterRow('stage2.livingRooms', 'Living / reception rooms')}
-            ${counterRow('stage2.diningRooms', 'Dining rooms')}
-            ${counterRow('stage2.officeRooms', 'Office / study rooms')}
-            ${counterRow('stage2.utilityRooms', 'Utility rooms')}
-            ${counterRow('stage2.otherRooms', 'Other rooms')}
             ${selectField('stage2.furnished', 'Furnished or unfurnished?', ['', 'Furnished', 'Unfurnished', 'Not applicable'])}
         ` : ''}
 
@@ -563,15 +611,22 @@ const TEMPLATES = {
             ${textareaField('stage2.abcResidueNotes', 'Any residues or issues we should know about?')}
         ` : ''}
 
-        ${textField('stage2.floor', 'Floor (e.g. ground, 2nd floor)')}
-        ${selectField('stage2.accessType', 'Access', ['', 'Ground floor / no stairs', 'Stairs only', 'Lift available', 'Other access restriction'])}
+        ${selectField('stage2.floor', 'Floor', ['', 'Ground floor', 'First floor', 'Second floor', 'Third floor or above'], { required: true })}
+        ${selectField('stage2.accessType', 'Access', ['', 'Ground floor / no stairs', 'Stairs only', 'Lift available', 'Other access restriction'], { required: true })}
+        <div class="info-note" id="accessOtherNote" ${state.stage2.accessType === 'Other access restriction' ? '' : 'hidden'}>Please provide details in the 'anything else we should know box below'</div>
         ${textareaField('stage2.accessRestrictions', 'Any access restrictions?')}
-        ${textField('stage2.parking', 'Parking information')}
-        ${textareaField('stage2.problemAreas', 'Problem areas / particular requirements')}
-        ${textareaField('stage2.anythingElse', 'Anything else we should know?')}
+        ${selectField('stage2.parking', 'Parking', ['', 'Free parking or driveway', 'Paid on-street parking', 'Permit required', 'Restricted or no nearby parking', 'Not sure'], { required: true })}
+        ${textareaField('stage2.problemAreas', 'Problem areas or anything else we should know')}
 
         <div class="form-group">
-            <p style="font-size:12px;color:#64748b;text-align:left;margin-top:0;">We'll use these details to prepare your final quotation, in line with our privacy notice. We won't use your details for marketing.</p>
+            <label>Photos (optional)</label>
+            <input type="file" id="stage2PhotoInput" accept="image/*" multiple>
+            <span class="hint">Add photos from your camera or photo gallery — you can select more than one.</span>
+            <div class="photo-preview" id="photoPreview">${renderPhotoPreview()}</div>
+        </div>
+
+        <div class="form-group">
+            <p style="font-size:12px;color:#64748b;text-align:left;margin-top:0;">We'll use these details to prepare your final quotation, in line with our <a href="#privacy-notice" target="_blank" rel="noopener">Privacy Notice</a>. We won't use your details for marketing.</p>
             <label class="checkbox-row"><input type="checkbox" data-path="stage2.consent" ${state.stage2.consent ? 'checked' : ''}><span>I agree to Gleamly contacting me about this enquiry using the details above.</span></label>
         </div>
 
@@ -579,7 +634,7 @@ const TEMPLATES = {
     `,
 
     confirmation: () => `
-        <div class="hero-icon">✅</div>
+        <div class="hero-icon">${logoIcon()}</div>
         <h2>Thanks — your request has been received</h2>
         <p>Gleamly has received your enquiry${state.stage2.name ? `, ${escapeHTML(state.stage2.name)}` : ''}. Our team will review the details and confirm your final quotation shortly.</p>
         ${state.lastEnquiryId ? `<p class="hint" style="text-align:center;">Reference: ${escapeHTML(state.lastEnquiryId)}</p>` : ''}
@@ -610,20 +665,6 @@ function nextStepKey(key){
     }
 }
 
-function prefillStage2(){
-    if(state.service !== 'restore'){
-        if(state.stage2.bedroomsExact === '') {
-            state.stage2.bedroomsExact = state.bedroomsOption === 'studio' ? 0 : (state.bedroomsOption === '5+' ? '' : Number(state.bedroomsOption));
-        }
-        if(state.stage2.bathroomsExact === '') state.stage2.bathroomsExact = state.bathrooms;
-        if(state.stage2.wcsExact === '') state.stage2.wcsExact = state.wcs;
-        if(!state.stage2.diningRooms) state.stage2.diningRooms = state.additionalRooms.dining;
-        if(!state.stage2.officeRooms) state.stage2.officeRooms = state.additionalRooms.office;
-        if(!state.stage2.utilityRooms) state.stage2.utilityRooms = state.additionalRooms.utility;
-        if(!state.stage2.otherRooms) state.stage2.otherRooms = state.additionalRooms.other;
-    }
-}
-
 function submitEnquiryRecord(){
     const id = 'GLM-' + Date.now().toString(36).toUpperCase();
     state.lastEnquiryId = id;
@@ -648,7 +689,7 @@ function submitEnquiryRecord(){
             ? { type: 'restore', amount: state.restoreEstimate }
             : (state.bespokeReason ? { type: 'bespoke', reason: state.bespokeReason } : { type: 'range', from: state.estimate.from, to: state.estimate.to }),
         stage2: Object.assign({}, state.stage2),
-        photos: [] // photo upload is out of scope for this build
+        photos: selectedPhotos.map(f => f.name)
     };
 
     try{
@@ -680,9 +721,6 @@ function handleSideEffects(key){
     }
     if(key === 'restoreConcern'){
         computeRestoreEstimate();
-    }
-    if(key === 'estimate' || key === 'bespoke'){
-        prefillStage2();
     }
     if(key === 'stage2'){
         submitEnquiryRecord();
@@ -732,7 +770,11 @@ function validateStage2(){
     if(!s.mobile || !/^[0-9+()\-\s]{7,20}$/.test(s.mobile.trim())) errors.push('Please enter a valid mobile number.');
     if(!s.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.email.trim())) errors.push('Please enter a valid email address.');
     if(!s.postcode || !s.postcode.trim()) errors.push('Please enter the property postcode.');
-    if(!s.preferredDate) errors.push('Please choose a preferred cleaning date.');
+    if(!s.preferredDateOption) errors.push('Please choose a preferred cleaning date option.');
+    else if(s.preferredDateOption === 'date' && !s.preferredDate) errors.push('Please choose a preferred cleaning date.');
+    if(!s.floor) errors.push('Please select the property floor.');
+    if(!s.accessType) errors.push('Please select the access details.');
+    if(!s.parking) errors.push('Please select the parking option.');
     if(!s.consent) errors.push('Please confirm you agree to be contacted about this enquiry.');
     return { valid: errors.length === 0, errors };
 }
@@ -776,6 +818,7 @@ function goTo(key){
     renderCurrent();
 }
 function goBack(){
+    editMode = false;
     if(stepHistory.length > 1){
         stepHistory.pop();
         renderCurrent();
@@ -785,7 +828,14 @@ function restart(){
     state = freshState();
     stepHistory = ['service'];
     analyticsFlags = {};
+    editMode = false;
+    selectedPhotos = [];
     renderCurrent();
+}
+
+function editAnswer(step){
+    editMode = true;
+    goTo(step);
 }
 
 function attemptAdvance(){
@@ -797,6 +847,18 @@ function attemptAdvance(){
     }
     hideErrors();
     handleSideEffects(key);
+
+    if(editMode){
+        editMode = false;
+        if(state.service === 'restore'){
+            computeRestoreEstimate();
+        } else if(!state.bespokeReason){
+            computeEstimate();
+        }
+        goTo('stage2');
+        return;
+    }
+
     goTo(nextStepKey(key));
 }
 
@@ -831,10 +893,20 @@ function handleContainerClick(e){
 
     const incBtn = e.target.closest('[data-action="counter-inc"]');
     if(incBtn){ adjustCounter(incBtn, 1); return; }
+
+    const editBtn = e.target.closest('[data-action="edit-answer"]');
+    if(editBtn){ editAnswer(editBtn.dataset.targetStep); return; }
 }
 
 function handleFieldSync(e){
     const t = e.target;
+
+    if(t.id === 'stage2PhotoInput'){
+        Array.from(t.files || []).forEach(f => selectedPhotos.push(f));
+        renderPhotoPreviewInto();
+        return;
+    }
+
     if(!t.dataset || t.dataset.path === undefined) return;
 
     let value;
@@ -847,6 +919,20 @@ function handleFieldSync(e){
     if(t.dataset.path === 'stains'){
         const group = document.getElementById('concernNotesGroup');
         if(group) group.hidden = (value !== 'yes');
+    }
+
+    if(t.dataset.path === 'propertyType'){
+        state.stairsFlights = value === 'house' ? 1 : 0;
+    }
+
+    if(t.dataset.path === 'stage2.preferredDateOption'){
+        const group = document.getElementById('preferredDateGroup');
+        if(group) group.hidden = (value !== 'date');
+    }
+
+    if(t.dataset.path === 'stage2.accessType'){
+        const note = document.getElementById('accessOtherNote');
+        if(note) note.hidden = (value !== 'Other access restriction');
     }
 }
 
