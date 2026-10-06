@@ -1,19 +1,18 @@
 // ===============================
 // Gleamly Instant Estimate & Quotation System
 // Stage 1 (instant estimate) + Stage 2 (final-quote form)
-// Photo/media upload is intentionally out of scope for this build.
 // ===============================
 
 'use strict';
 
 // -------------------------------
-// Pricing configuration
-// All rates, labour hours, multipliers and Restore prices live here so the
-// site administrator can change them (via the Admin panel, bottom-right gear
-// icon) without touching source code. Values persist in localStorage.
+// Site configuration
+// Every number or list Gleamly might want to change lives here. There is no
+// in-browser admin panel — to change a price, the postcode service area, or
+// where quote requests are sent, edit the values below and redeploy.
 // -------------------------------
 
-const DEFAULT_CONFIG = {
+const CONFIG = {
     rates: { reset: 22, resetPlus: 22, abc: 26 },
 
     conditionMultipliers: { average: 1.00, attention: 1.30, heavy: 1.50 },
@@ -39,8 +38,59 @@ const DEFAULT_CONFIG = {
         bedroom: 40, living: 50, dining: 50, hallway: 25, landing: 20,
         stairsBase: 40, stairsBaseSteps: 13, additionalStairEach: 3,
         standaloneMinimum: 70
+    },
+
+    // Optional Services add-ons (Gleamly Reset / Reset Plus only — brief section D).
+    // Oven/fridge prices are intentionally never shown in the UI (D7); they
+    // only ever feed into the final estimate total. Carpet cleaning reuses
+    // the `restore` prices above.
+    extras: {
+        oven: 20,
+        fridge: 15
+    },
+
+    // Postcode service area (brief section C). Add/remove districts here —
+    // exact district code only (e.g. "E14"), not a postcode area ("E").
+    postcode: {
+        e1District: 'E1',
+        approvedDistricts: [
+            'E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9', 'E10',
+            'E11', 'E12', 'E13', 'E14', 'E15', 'E16', 'E18', 'E20',
+            'SE2', 'SE3', 'SE4', 'SE6', 'SE7', 'SE8', 'SE9', 'SE10',
+            'SE12', 'SE13', 'SE14', 'SE15', 'SE16', 'SE18', 'SE28'
+        ],
+        // Where the "Submit an enquiry" button goes for an out-of-area
+        // postcode. Leave blank to fall back to the short in-estimator
+        // enquiry form instead.
+        enquiryFormUrl: ''
     }
 };
+
+// Get a free access key at https://web3forms.com (just an email address,
+// no account needed) and paste it here before going live. Until then, quote
+// requests are still saved to this browser's localStorage as a backup, but
+// will not reach Gleamly anywhere else — see submitToWeb3Forms() below.
+const WEB3FORMS_ACCESS_KEY = 'YOUR_WEB3FORMS_ACCESS_KEY';
+
+// -------------------------------
+// Deep-linking a specific service (e.g. a dedicated Restore landing page's
+// CTA). The postcode check still always comes first (it must apply to every
+// service), but once a postcode is accepted, a deep-linked visitor skips the
+// "choose your service" step and goes straight into that service's flow.
+// Example: index.html?service=restore
+// -------------------------------
+
+function resolveServiceFromQuery(){
+    try{
+        const raw = (new URLSearchParams(window.location.search).get('service') || '').toLowerCase().replace(/[^a-z]/g, '');
+        const aliases = { reset: 'reset', resetplus: 'resetPlus', abc: 'abc', restore: 'restore' };
+        return aliases[raw] || null;
+    }catch(e){
+        return null;
+    }
+}
+
+const PRESELECTED_SERVICE = resolveServiceFromQuery();
 
 function getByPath(obj, path){
     return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
@@ -51,32 +101,6 @@ function setByPath(obj, path, value){
     for(let i = 0; i < parts.length - 1; i++){ o = o[parts[i]]; }
     o[parts[parts.length - 1]] = value;
 }
-function deepClone(obj){ return JSON.parse(JSON.stringify(obj)); }
-function deepMerge(base, override){
-    Object.keys(override || {}).forEach(k => {
-        if(override[k] && typeof override[k] === 'object' && !Array.isArray(override[k]) && base[k] && typeof base[k] === 'object'){
-            deepMerge(base[k], override[k]);
-        } else {
-            base[k] = override[k];
-        }
-    });
-    return base;
-}
-
-function loadConfig(){
-    try{
-        const raw = localStorage.getItem('gleamlyConfig');
-        if(!raw) return deepClone(DEFAULT_CONFIG);
-        return deepMerge(deepClone(DEFAULT_CONFIG), JSON.parse(raw));
-    }catch(e){
-        return deepClone(DEFAULT_CONFIG);
-    }
-}
-function saveConfig(){
-    localStorage.setItem('gleamlyConfig', JSON.stringify(CONFIG));
-}
-
-let CONFIG = loadConfig();
 
 // -------------------------------
 // Reference data / wording
@@ -105,24 +129,27 @@ const BEDROOM_OPTIONS = ['studio', '1', '2', '3', '4', '5+'];
 const BEDROOM_LABELS = { studio: 'Studio', '1': '1 Bedroom', '2': '2 Bedrooms', '3': '3 Bedrooms', '4': '4 Bedrooms', '5+': '5+ Bedrooms' };
 
 const STEP_LABELS = {
+    postcode: 'Check your postcode',
     service: 'Choose your service',
     propertyType: 'Property type',
     bedrooms: 'Bedrooms',
     bathrooms: 'Bathrooms & WCs',
     additionalRooms: 'Additional rooms',
     condition: 'Property condition',
+    extras: 'Optional extras',
     restoreAreas: 'Areas to clean',
     restoreConcern: 'Stains & concerns',
     bespoke: 'Bespoke estimate',
+    generalEnquiry: 'Submit an enquiry',
     estimate: 'Your estimate',
     stage2: 'Final quote details',
     confirmation: 'Request received'
 };
 
 const STEP_WEIGHTS = {
-    service: 1, propertyType: 2, bedrooms: 2.5, restoreAreas: 2, bathrooms: 3,
-    additionalRooms: 3.5, condition: 4, restoreConcern: 3, bespoke: 4.5,
-    estimate: 5, stage2: 6, confirmation: 7
+    postcode: 0.5, service: 1, propertyType: 2, bedrooms: 2.5, restoreAreas: 2, bathrooms: 3,
+    additionalRooms: 3.5, condition: 4, extras: 4.3, restoreConcern: 3, bespoke: 4.5,
+    generalEnquiry: 2, estimate: 5, stage2: 6, confirmation: 7
 };
 const TOTAL_WEIGHT = 7;
 
@@ -132,7 +159,8 @@ const TOTAL_WEIGHT = 7;
 
 function freshState(){
     return {
-        service: null,
+        postcode: { raw: '', normalized: '', district: '', status: null },
+        service: PRESELECTED_SERVICE || null,
         propertyType: null,
         bedroomsOption: null,
         bathrooms: 1,
@@ -140,6 +168,12 @@ function freshState(){
         stairsFlights: 0,
         additionalRooms: { dining: 0, office: 0, utility: 0, other: 0 },
         condition: null,
+        extras: {
+            oven: false,
+            fridge: false,
+            carpet: false,
+            carpetAreas: { bedroom: 0, living: 0, dining: 0, hallway: 0, landing: 0, stairsSteps: 0 }
+        },
         restoreAreas: { bedroom: 0, living: 0, dining: 0, hallway: 0, landing: 0, stairsSteps: 0 },
         restoreStandalone: true,
         stains: null,
@@ -148,6 +182,7 @@ function freshState(){
         restoreEstimate: null,
         bespokeReason: null,
         lastEnquiryId: null,
+        generalEnquiry: { name: '', mobile: '', email: '', message: '', postcode: '', consent: false },
         stage2: {
             name: '', mobile: '', email: '', postcode: '',
             preferredDateOption: '', preferredDate: '',
@@ -160,7 +195,7 @@ function freshState(){
 }
 
 let state = freshState();
-let stepHistory = ['service'];
+let stepHistory = ['postcode'];
 let analyticsFlags = {};
 let editMode = false;
 let selectedPhotos = [];
@@ -208,15 +243,37 @@ function calcLabourHours(){
     return hours;
 }
 
+function calcExtrasTotal(){
+    let total = 0;
+    if(state.service === 'reset'){
+        if(state.extras.oven) total += CONFIG.extras.oven;
+        if(state.extras.fridge) total += CONFIG.extras.fridge;
+    }
+    if(state.extras.carpet){
+        const r = CONFIG.restore;
+        const a = state.extras.carpetAreas;
+        let carpetTotal = a.bedroom * r.bedroom + a.living * r.living + a.dining * r.dining + a.hallway * r.hallway + a.landing * r.landing;
+        if(a.stairsSteps > 0){
+            carpetTotal += r.stairsBase;
+            carpetTotal += Math.max(0, a.stairsSteps - r.stairsBaseSteps) * r.additionalStairEach;
+        }
+        // D9: the £70 standalone Restore minimum never applies to carpet as an add-on.
+        total += carpetTotal;
+    }
+    return total;
+}
+
 function computeEstimate(){
     const hours = calcLabourHours();
     const rate = CONFIG.rates[state.service];
     const internal = hours * rate;
+    const extrasTotal = calcExtrasTotal();
     state.estimate = {
         hours,
         internal,
-        from: ceilToNearest(internal, CONFIG.roundTo),
-        to: ceilToNearest(internal * CONFIG.rangeUplift, CONFIG.roundTo)
+        extrasTotal,
+        from: ceilToNearest(internal, CONFIG.roundTo) + extrasTotal,
+        to: ceilToNearest(internal * CONFIG.rangeUplift, CONFIG.roundTo) + extrasTotal
     };
 }
 
@@ -240,6 +297,31 @@ function calcRestoreEstimate(){
 
 function computeRestoreEstimate(){
     state.restoreEstimate = calcRestoreEstimate();
+}
+
+// -------------------------------
+// Postcode checker (brief section B)
+// -------------------------------
+
+function isValidUKPostcode(raw){
+    const compact = String(raw || '').toUpperCase().replace(/\s+/g, '');
+    return /^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/.test(compact);
+}
+
+function normalizePostcode(raw){
+    const compact = String(raw || '').toUpperCase().replace(/\s+/g, '');
+    return `${compact.slice(0, -3)} ${compact.slice(-3)}`;
+}
+
+function postcodeDistrict(normalized){
+    return normalized.split(' ')[0];
+}
+
+function checkPostcodeStatus(district){
+    const cfg = CONFIG.postcode;
+    if(district === cfg.e1District) return 'e1';
+    if(cfg.approvedDistricts.includes(district)) return 'covered';
+    return 'outside';
 }
 
 // -------------------------------
@@ -398,6 +480,25 @@ function summaryHTML(){
                 const meta = state.service === 'abc' ? ABC_CONDITION_META : CONDITION_META;
                 rows.push(summaryRow('Condition', escapeHTML(meta[state.condition].title), 'condition'));
             }
+
+            if(state.service === 'reset' || state.service === 'resetPlus'){
+                const ex = state.extras;
+                const exParts = [];
+                if(ex.oven) exParts.push('Oven cleaning');
+                if(ex.fridge) exParts.push('Fridge cleaning');
+                if(ex.carpet){
+                    const ca = ex.carpetAreas;
+                    const areaParts = [];
+                    if(ca.bedroom) areaParts.push(`${ca.bedroom} bedroom`);
+                    if(ca.living) areaParts.push(`${ca.living} living room`);
+                    if(ca.dining) areaParts.push(`${ca.dining} dining room`);
+                    if(ca.hallway) areaParts.push(`${ca.hallway} hallway`);
+                    if(ca.landing) areaParts.push(`${ca.landing} landing`);
+                    if(ca.stairsSteps) areaParts.push(`${ca.stairsSteps} stair steps`);
+                    exParts.push(`Carpet cleaning (${areaParts.join(', ') || 'no areas selected'})`);
+                }
+                rows.push(summaryRow('Optional extras', exParts.join(', ') || 'None', 'extras'));
+            }
         }
     } else {
         const a = state.restoreAreas;
@@ -436,10 +537,40 @@ function bespokeMessage(){
 
 const TEMPLATES = {
 
+    postcode: () => {
+        const p = state.postcode;
+        let resultBlock = '';
+        if(p.status === 'covered'){
+            resultBlock = `
+                <div class="postcode-result covered"><p>Great news — we cover your area. Continue to receive your instant estimate.</p></div>
+                <div class="buttons"><button class="next" data-action="postcode-continue">Continue to get an estimate</button></div>
+            `;
+        } else if(p.status === 'e1'){
+            resultBlock = `
+                <div class="postcode-result e1"><p>We cover this area, but a central London travel charge may apply. We'll check the full address before confirming your final quotation.</p></div>
+                <div class="buttons"><button class="next" data-action="postcode-continue">Continue to get an estimate</button></div>
+            `;
+        } else if(p.status === 'outside'){
+            resultBlock = `
+                <div class="postcode-result outside"><p>This postcode is outside our standard service area. We may still be able to help depending on the location and type of clean. Submit a quick enquiry and we'll confirm availability.</p></div>
+                <div class="buttons"><button class="back" data-action="postcode-reset">Check another postcode</button><button class="next" data-action="postcode-enquiry">Submit an enquiry</button></div>
+            `;
+        }
+        return `
+            <div class="hero-icon">${logoIcon()}</div>
+            <h1>Gleamly Instant Estimate</h1>
+            <p>Get an instant estimate in under a minute — no personal details needed. Start by checking your postcode.</p>
+            <div class="form-errors" id="formErrors" hidden></div>
+            <div class="postcode-input-row">
+                <input type="text" id="postcodeInput" placeholder="e.g. E14 5AB" value="${escapeHTML(p.raw)}" autocomplete="postal-code" maxlength="10">
+                <button type="button" data-action="postcode-check">Check my postcode</button>
+            </div>
+            ${resultBlock}
+        `;
+    },
+
     service: () => `
-        <div class="hero-icon">${logoIcon()}</div>
-        <h1>Gleamly Instant Estimate</h1>
-        <p>Get an instant price range in about a minute — no contact details needed.</p>
+        <h2>Choose your service</h2>
         <div class="form-errors" id="formErrors" hidden></div>
         <div class="cards cols-2">
             ${Object.entries(SERVICE_META).map(([key, meta]) => `
@@ -449,7 +580,7 @@ const TEMPLATES = {
                 </label>
             `).join('')}
         </div>
-        <div class="buttons"><button class="next" data-action="next">Continue</button></div>
+        <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Continue</button></div>
     `,
 
     propertyType: () => `
@@ -509,6 +640,58 @@ const TEMPLATES = {
             <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Continue</button></div>
         `;
     },
+
+    extras: () => {
+        const isReset = state.service === 'reset';
+        const e = state.extras;
+        return `
+            <h2>Optional extras</h2>
+            <p>Add any of the following to your clean, or skip if you don't need them.</p>
+            <div class="form-errors" id="formErrors" hidden></div>
+            ${isReset ? `
+                <label class="extras-toggle ${e.oven ? 'active' : ''}">
+                    <input type="checkbox" data-path="extras.oven" ${e.oven ? 'checked' : ''} style="display:none;">
+                    <div><h3>Oven cleaning</h3><p>A thorough clean of the oven interior.</p></div>
+                    <div class="extras-switch"></div>
+                </label>
+                <label class="extras-toggle ${e.fridge ? 'active' : ''}">
+                    <input type="checkbox" data-path="extras.fridge" ${e.fridge ? 'checked' : ''} style="display:none;">
+                    <div><h3>Fridge cleaning</h3><p>Inside and out, including shelves and seals.</p></div>
+                    <div class="extras-switch"></div>
+                </label>
+            ` : ''}
+            <label class="extras-toggle ${e.carpet ? 'active' : ''}">
+                <input type="checkbox" data-path="extras.carpet" ${e.carpet ? 'checked' : ''} style="display:none;">
+                <div><h3>Carpet cleaning</h3><p>Professional carpet cleaning for any carpeted areas.</p></div>
+                <div class="extras-switch"></div>
+            </label>
+            ${e.carpet ? `
+                ${counterRow('extras.carpetAreas.bedroom', `Bedroom <span class="hint">£${CONFIG.restore.bedroom} each</span>`)}
+                ${counterRow('extras.carpetAreas.living', `Living room <span class="hint">£${CONFIG.restore.living} each</span>`)}
+                ${counterRow('extras.carpetAreas.dining', `Dining room <span class="hint">£${CONFIG.restore.dining} each</span>`)}
+                ${counterRow('extras.carpetAreas.hallway', `Hallway <span class="hint">£${CONFIG.restore.hallway} each</span>`)}
+                ${counterRow('extras.carpetAreas.landing', `Landing <span class="hint">£${CONFIG.restore.landing} each</span>`)}
+                ${numberField('extras.carpetAreas.stairsSteps', 'Stairs — number of steps', { min: 0, max: 60, hint: `First ${CONFIG.restore.stairsBaseSteps} steps £${CONFIG.restore.stairsBase}, then £${CONFIG.restore.additionalStairEach} per extra step.` })}
+            ` : ''}
+            <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Continue</button></div>
+        `;
+    },
+
+    generalEnquiry: () => `
+        <h2>Submit a quick enquiry</h2>
+        <div class="form-errors" id="formErrors" hidden></div>
+        <p>Your postcode (${escapeHTML(state.generalEnquiry.postcode || state.postcode.raw)}) is outside our standard service area, but tell us a bit about what you need and we'll confirm availability.</p>
+        <div class="form-row">
+            ${textField('generalEnquiry.name', 'Full name', { required: true })}
+            ${textField('generalEnquiry.mobile', 'Mobile number', { type: 'tel', required: true })}
+        </div>
+        ${textField('generalEnquiry.email', 'Email', { type: 'email', required: true })}
+        ${textareaField('generalEnquiry.message', 'What do you need cleaned?')}
+        <div class="form-group">
+            <label class="checkbox-row"><input type="checkbox" data-path="generalEnquiry.consent" ${state.generalEnquiry.consent ? 'checked' : ''}><span>I agree to Gleamly contacting me about this enquiry using the details above.</span></label>
+        </div>
+        <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Send my enquiry</button></div>
+    `,
 
     restoreAreas: () => `
         <h2>Which areas need cleaning?</h2>
@@ -650,19 +833,57 @@ function currentStepKey(){ return stepHistory[stepHistory.length - 1]; }
 
 function nextStepKey(key){
     switch(key){
+        case 'postcode': return 'service';
         case 'service': return state.service === 'restore' ? 'restoreAreas' : 'propertyType';
         case 'propertyType': return 'bedrooms';
         case 'bedrooms': return state.bedroomsOption === '5+' ? 'bespoke' : 'bathrooms';
         case 'bathrooms': return 'additionalRooms';
         case 'additionalRooms': return 'condition';
-        case 'condition': return (state.service === 'abc' && state.condition !== 'standard') ? 'bespoke' : 'estimate';
+        case 'condition':
+            if(state.service === 'abc' && state.condition !== 'standard') return 'bespoke';
+            if(state.service === 'reset' || state.service === 'resetPlus') return 'extras';
+            return 'estimate';
+        case 'extras': return 'estimate';
         case 'restoreAreas': return 'restoreConcern';
         case 'restoreConcern': return 'estimate';
         case 'estimate': return 'stage2';
         case 'bespoke': return 'stage2';
         case 'stage2': return 'confirmation';
-        default: return 'service';
+        case 'generalEnquiry': return 'confirmation';
+        default: return 'postcode';
     }
+}
+
+// -------------------------------
+// Submission (brief: Tally was considered, but a secret API key can never
+// live in public page source — Web3Forms is built for exactly this, a
+// public-safe access key posted straight from client-side JS, no backend)
+// -------------------------------
+
+function persistEnquiryLocally(record){
+    try{
+        const existing = JSON.parse(localStorage.getItem('gleamlyEnquiries') || '[]');
+        existing.push(record);
+        localStorage.setItem('gleamlyEnquiries', JSON.stringify(existing));
+    }catch(e){ /* storage unavailable — submission still attempted below */ }
+}
+
+function submitToWeb3Forms(record, files){
+    if(WEB3FORMS_ACCESS_KEY === 'YOUR_WEB3FORMS_ACCESS_KEY'){
+        console.warn('[Gleamly] WEB3FORMS_ACCESS_KEY is not set — this submission was only saved to localStorage and will not reach Gleamly. Get a free key at https://web3forms.com and paste it into script.js.');
+        return;
+    }
+    const formData = new FormData();
+    formData.append('access_key', WEB3FORMS_ACCESS_KEY);
+    formData.append('subject', `New Gleamly ${record.type === 'general_enquiry' ? 'general enquiry' : 'quote request'} — ${record.id}`);
+    formData.append('from_name', 'Gleamly Instant Estimate');
+    formData.append('message', JSON.stringify(record, null, 2));
+    (files || []).forEach((f, i) => formData.append(`attachment_${i + 1}`, f, f.name));
+
+    fetch('https://api.web3forms.com/submit', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => { if(!data.success) console.error('[Gleamly] Web3Forms submission failed:', data); })
+        .catch(err => console.error('[Gleamly] Web3Forms submission error:', err));
 }
 
 function submitEnquiryRecord(){
@@ -671,8 +892,10 @@ function submitEnquiryRecord(){
 
     const record = {
         id,
+        type: 'quote_request',
         submittedAt: new Date().toISOString(),
         service: state.service,
+        postcodeCheck: { district: state.postcode.district, status: state.postcode.status },
         stage1: {
             propertyType: state.propertyType,
             bedroomsOption: state.bedroomsOption,
@@ -685,26 +908,46 @@ function submitEnquiryRecord(){
             stains: state.stains,
             concernNotes: state.concernNotes
         },
+        extras: (state.service === 'reset' || state.service === 'resetPlus') ? {
+            oven: !!state.extras.oven,
+            fridge: !!state.extras.fridge,
+            carpet: !!state.extras.carpet,
+            carpetAreas: state.extras.carpet ? Object.assign({}, state.extras.carpetAreas) : null
+        } : null,
         estimate: state.service === 'restore'
             ? { type: 'restore', amount: state.restoreEstimate }
-            : (state.bespokeReason ? { type: 'bespoke', reason: state.bespokeReason } : { type: 'range', from: state.estimate.from, to: state.estimate.to }),
+            : (state.bespokeReason ? { type: 'bespoke', reason: state.bespokeReason } : { type: 'range', from: state.estimate.from, to: state.estimate.to, extrasTotal: state.estimate.extrasTotal }),
         stage2: Object.assign({}, state.stage2),
         photos: selectedPhotos.map(f => f.name)
     };
 
-    try{
-        const existing = JSON.parse(localStorage.getItem('gleamlyEnquiries') || '[]');
-        existing.push(record);
-        localStorage.setItem('gleamlyEnquiries', JSON.stringify(existing));
-    }catch(e){ /* storage unavailable — enquiry still logged below */ }
+    persistEnquiryLocally(record);
+    submitToWeb3Forms(record, selectedPhotos);
 
-    // In production this would call a backend endpoint to email/notify the
-    // Gleamly office (name, mobile, service, postcode, date, estimate) and
-    // persist the full structured record. No backend exists in this static
-    // build, so we log it instead.
-    console.log('New Gleamly enquiry received (would notify office system):', record);
-
+    console.log('New Gleamly enquiry received:', record);
     track('final_quote_submitted', { service: state.service, id });
+}
+
+function submitGeneralEnquiry(){
+    const id = 'GLM-' + Date.now().toString(36).toUpperCase();
+    state.lastEnquiryId = id;
+
+    const record = {
+        id,
+        type: 'general_enquiry',
+        submittedAt: new Date().toISOString(),
+        postcode: state.generalEnquiry.postcode || state.postcode.raw,
+        name: state.generalEnquiry.name,
+        mobile: state.generalEnquiry.mobile,
+        email: state.generalEnquiry.email,
+        message: state.generalEnquiry.message
+    };
+
+    persistEnquiryLocally(record);
+    submitToWeb3Forms(record, []);
+
+    console.log('New Gleamly general enquiry received:', record);
+    track('general_enquiry_submitted', { id });
 }
 
 function handleSideEffects(key){
@@ -719,11 +962,17 @@ function handleSideEffects(key){
             computeEstimate();
         }
     }
+    if(key === 'extras'){
+        computeEstimate();
+    }
     if(key === 'restoreConcern'){
         computeRestoreEstimate();
     }
     if(key === 'stage2'){
         submitEnquiryRecord();
+    }
+    if(key === 'generalEnquiry'){
+        submitGeneralEnquiry();
     }
 }
 
@@ -757,9 +1006,21 @@ function validateStep(key){
             break;
         case 'stage2':
             return validateStage2();
+        case 'generalEnquiry':
+            return validateGeneralEnquiry();
         default:
             break;
     }
+    return { valid: errors.length === 0, errors };
+}
+
+function validateGeneralEnquiry(){
+    const errors = [];
+    const g = state.generalEnquiry;
+    if(!g.name || !g.name.trim()) errors.push('Please enter your name.');
+    if(!g.mobile || !/^[0-9+()\-\s]{7,20}$/.test(g.mobile.trim())) errors.push('Please enter a valid mobile number.');
+    if(!g.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(g.email.trim())) errors.push('Please enter a valid email address.');
+    if(!g.consent) errors.push('Please confirm you agree to be contacted about this enquiry.');
     return { valid: errors.length === 0, errors };
 }
 
@@ -826,10 +1087,31 @@ function goBack(){
 }
 function restart(){
     state = freshState();
-    stepHistory = ['service'];
+    stepHistory = ['postcode'];
     analyticsFlags = {};
     editMode = false;
     selectedPhotos = [];
+    renderCurrent();
+}
+
+function handlePostcodeCheck(){
+    const input = document.getElementById('postcodeInput');
+    const raw = input ? input.value : '';
+    state.postcode.raw = raw;
+
+    if(!isValidUKPostcode(raw)){
+        state.postcode.status = null;
+        showErrors(['Please enter a valid full UK postcode (e.g. E14 5AB).']);
+        return;
+    }
+
+    hideErrors();
+    const normalized = normalizePostcode(raw);
+    const district = postcodeDistrict(normalized);
+    state.postcode.normalized = normalized;
+    state.postcode.district = district;
+    state.postcode.status = checkPostcodeStatus(district);
+    state.stage2.postcode = normalized; // B5: carried through, never typed twice
     renderCurrent();
 }
 
@@ -896,6 +1178,38 @@ function handleContainerClick(e){
 
     const editBtn = e.target.closest('[data-action="edit-answer"]');
     if(editBtn){ editAnswer(editBtn.dataset.targetStep); return; }
+
+    const pcCheck = e.target.closest('[data-action="postcode-check"]');
+    if(pcCheck){ handlePostcodeCheck(); return; }
+
+    const pcContinue = e.target.closest('[data-action="postcode-continue"]');
+    if(pcContinue){
+        if(PRESELECTED_SERVICE){
+            state.service = PRESELECTED_SERVICE;
+            goTo(nextStepKey('service'));
+        } else {
+            goTo('service');
+        }
+        return;
+    }
+
+    const pcReset = e.target.closest('[data-action="postcode-reset"]');
+    if(pcReset){
+        state.postcode = { raw: '', normalized: '', district: '', status: null };
+        renderCurrent();
+        return;
+    }
+
+    const pcEnquiry = e.target.closest('[data-action="postcode-enquiry"]');
+    if(pcEnquiry){
+        if(CONFIG.postcode.enquiryFormUrl){
+            window.open(CONFIG.postcode.enquiryFormUrl, '_blank', 'noopener');
+        } else {
+            state.generalEnquiry.postcode = state.postcode.raw;
+            goTo('generalEnquiry');
+        }
+        return;
+    }
 }
 
 function handleFieldSync(e){
@@ -934,104 +1248,15 @@ function handleFieldSync(e){
         const note = document.getElementById('accessOtherNote');
         if(note) note.hidden = (value !== 'Other access restriction');
     }
+
+    if(t.dataset.path.indexOf('extras.') === 0 && t.type === 'checkbox'){
+        renderCurrent();
+    }
 }
 
 stepContainer.addEventListener('click', handleContainerClick);
 stepContainer.addEventListener('input', handleFieldSync);
 stepContainer.addEventListener('change', handleFieldSync);
-
-// -------------------------------
-// Admin panel (pricing variables editable without touching source code)
-// -------------------------------
-
-const ADMIN_FIELDS = [
-    { section: 'Hourly rates (£)', fields: [
-        ['rates.reset', 'Reset'], ['rates.resetPlus', 'Reset Plus'], ['rates.abc', 'ABC']
-    ]},
-    { section: 'Condition multipliers (Reset / Reset Plus)', fields: [
-        ['conditionMultipliers.average', 'Average'], ['conditionMultipliers.attention', 'Needs extra attention'], ['conditionMultipliers.heavy', 'Heavy']
-    ]},
-    { section: 'Labour hours — Reset', fields: [
-        ['labour.reset.kitchen', 'Kitchen'], ['labour.reset.bathroom', 'Bathroom (each)'], ['labour.reset.bedroom', 'Bedroom (each)'],
-        ['labour.reset.living', 'Living room'], ['labour.reset.hall', 'Hall/landing'], ['labour.reset.stairs', 'Per staircase'],
-        ['labour.reset.additionalWC', 'Additional WC'], ['labour.reset.incidentals', 'Incidentals']
-    ]},
-    { section: 'Labour hours — Reset Plus', fields: [
-        ['labour.resetPlus.kitchen', 'Kitchen'], ['labour.resetPlus.bathroom', 'Bathroom (each)'], ['labour.resetPlus.bedroom', 'Bedroom (each)'],
-        ['labour.resetPlus.living', 'Living room'], ['labour.resetPlus.hall', 'Hall/landing'], ['labour.resetPlus.stairs', 'Per staircase'],
-        ['labour.resetPlus.additionalWC', 'Additional WC'], ['labour.resetPlus.incidentals', 'Incidentals']
-    ]},
-    { section: 'Labour hours — ABC', fields: [
-        ['labour.abc.kitchen', 'Kitchen'], ['labour.abc.bathroom', 'Bathroom (each)'], ['labour.abc.bedroom', 'Bedroom (each)'],
-        ['labour.abc.living', 'Living room'], ['labour.abc.hall', 'Hall/landing'], ['labour.abc.stairs', 'Per staircase'],
-        ['labour.abc.additionalWC', 'Additional WC'], ['labour.abc.incidentals', 'Incidentals']
-    ]},
-    { section: 'Additional rooms — Reset', fields: [
-        ['additionalRooms.reset.dining', 'Dining/reception'], ['additionalRooms.reset.office', 'Office/study'],
-        ['additionalRooms.reset.utility', 'Utility'], ['additionalRooms.reset.other', 'Other']
-    ]},
-    { section: 'Additional rooms — Reset Plus', fields: [
-        ['additionalRooms.resetPlus.dining', 'Dining/reception'], ['additionalRooms.resetPlus.office', 'Office/study'],
-        ['additionalRooms.resetPlus.utility', 'Utility'], ['additionalRooms.resetPlus.other', 'Other']
-    ]},
-    { section: 'Additional rooms — ABC', fields: [
-        ['additionalRooms.abc.dining', 'Dining/reception'], ['additionalRooms.abc.office', 'Office/study'],
-        ['additionalRooms.abc.utility', 'Utility'], ['additionalRooms.abc.other', 'Other']
-    ]},
-    { section: 'Studio reductions', fields: [
-        ['studioReduction.kitchen', 'Kitchen reduction'], ['studioReduction.living', 'Living room reduction']
-    ]},
-    { section: 'Range & rounding', fields: [
-        ['rangeUplift', 'Range uplift multiplier'], ['roundTo', 'Round up to nearest (£)']
-    ]},
-    { section: 'Restore pricing (£)', fields: [
-        ['restore.bedroom', 'Bedroom'], ['restore.living', 'Living room'], ['restore.dining', 'Dining room'],
-        ['restore.hallway', 'Hallway'], ['restore.landing', 'Landing'], ['restore.stairsBase', 'Stairs (base)'],
-        ['restore.stairsBaseSteps', 'Steps included in base'], ['restore.additionalStairEach', 'Additional step each'],
-        ['restore.standaloneMinimum', 'Standalone minimum booking']
-    ]}
-];
-
-const adminModal = document.getElementById('adminModal');
-const adminFieldsEl = document.getElementById('adminFields');
-
-function renderAdminFields(){
-    adminFieldsEl.innerHTML = ADMIN_FIELDS.map(section => `
-        <div class="admin-section">
-            <h4>${escapeHTML(section.section)}</h4>
-            ${section.fields.map(([path, label]) => `
-                <div class="admin-field">
-                    <label>${escapeHTML(label)}</label>
-                    <input type="number" step="0.01" data-admin-path="${path}" value="${getByPath(CONFIG, path)}">
-                </div>
-            `).join('')}
-        </div>
-    `).join('');
-}
-
-document.getElementById('adminToggle').addEventListener('click', () => {
-    renderAdminFields();
-    adminModal.hidden = false;
-});
-document.getElementById('adminClose').addEventListener('click', () => { adminModal.hidden = true; });
-adminModal.addEventListener('click', (e) => { if(e.target === adminModal) adminModal.hidden = true; });
-
-document.getElementById('adminSave').addEventListener('click', () => {
-    adminFieldsEl.querySelectorAll('input[data-admin-path]').forEach(inp => {
-        const num = parseFloat(inp.value);
-        if(!Number.isNaN(num)) setByPath(CONFIG, inp.dataset.adminPath, num);
-    });
-    saveConfig();
-    adminModal.hidden = true;
-    renderCurrent();
-});
-document.getElementById('adminReset').addEventListener('click', () => {
-    if(!confirm('Reset all pricing variables to their original defaults?')) return;
-    CONFIG = deepClone(DEFAULT_CONFIG);
-    saveConfig();
-    renderAdminFields();
-    renderCurrent();
-});
 
 // -------------------------------
 // Initialize
