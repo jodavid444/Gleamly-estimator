@@ -753,7 +753,7 @@ const TEMPLATES = {
         <div class="form-errors" id="formErrors" hidden></div>
         ${summaryHTML()}
 
-        <p class="hint" style="text-align:left;">By entering your contact details below you agree to our <a href="#privacy-notice" target="_blank" rel="noopener">Privacy Notice</a>.</p>
+        <p class="hint" style="text-align:left;">By entering your contact details below you agree to our <a href="https://gleamly.uk/new/privacy-policy/" target="_blank" rel="noopener">Privacy Notice</a>.</p>
 
         <div class="form-row">
             ${textField('stage2.name', 'Full name', { required: true })}
@@ -809,7 +809,7 @@ const TEMPLATES = {
         </div>
 
         <div class="form-group">
-            <p style="font-size:12px;color:#64748b;text-align:left;margin-top:0;">We'll use these details to prepare your final quotation, in line with our <a href="#privacy-notice" target="_blank" rel="noopener">Privacy Notice</a>. We won't use your details for marketing.</p>
+            <p style="font-size:12px;color:#64748b;text-align:left;margin-top:0;">We'll use these details to prepare your final quotation, in line with our <a href="https://gleamly.uk/new/privacy-policy/" target="_blank" rel="noopener">Privacy Notice</a>. We won't use your details for marketing.</p>
             <label class="checkbox-row"><input type="checkbox" data-path="stage2.consent" ${state.stage2.consent ? 'checked' : ''}><span>I agree to Gleamly contacting me about this enquiry using the details above.</span></label>
         </div>
 
