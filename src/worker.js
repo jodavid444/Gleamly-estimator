@@ -10,6 +10,7 @@ import { handleAdminLogin } from './routes/admin-login.js';
 import { handleAdminLogout } from './routes/admin-logout.js';
 import { handleAdminPricingGet, handleAdminPricingPost } from './routes/admin-pricing.js';
 import { handleSubmitQuote } from './routes/submit-quote.js';
+import { handleDebugSecret } from './routes/debug-secret.js';
 
 export default {
     async fetch(request, env){
@@ -22,6 +23,7 @@ export default {
         if(method === 'GET' && pathname === '/api/admin/pricing') return handleAdminPricingGet(request, env);
         if(method === 'POST' && pathname === '/api/admin/pricing') return handleAdminPricingPost(request, env);
         if(method === 'POST' && pathname === '/api/submit-quote') return handleSubmitQuote(request, env);
+        if(method === 'GET' && pathname === '/api/debug-secret') return handleDebugSecret(env);
 
         return env.ASSETS.fetch(request);
     }
