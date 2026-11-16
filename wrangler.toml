@@ -1,0 +1,53 @@
+# Cloudflare Worker (with static assets) config for the Gleamly estimator.
+#
+# Cloudflare's dashboard created this project as a "Worker with static
+# assets" rather than classic Pages, so the backend is one entry script
+# (src/worker.js) that routes /api/* by hand and falls back to serving the
+# static site (index.html, script.js, admin.html, etc.) for everything else.
+#
+# Setup still needed before this works (none of it is in this repo, on
+# purpose — secrets never get committed):
+#
+#   1. Create a KV namespace (dashboard: project -> Settings -> Bindings ->
+#      Add binding -> KV namespace -> Create new), bind it with variable
+#      name PRICING_KV, and put its id below in place of the placeholder.
+#   2. Create an R2 bucket named to match `bucket_name` below (or change the
+#      name here to match one you've already created), bind it with
+#      variable name PHOTOS_BUCKET.
+#   3. Set these as Worker secrets (dashboard -> Settings -> Variables and
+#      Secrets, or `wrangler secret put <NAME>`):
+#        ADMIN_PASSWORD        — the password Patricia logs into /admin.html with
+#        ADMIN_SESSION_SECRET  — any long random string, used to sign session cookies
+#        RECAPTCHA_SECRET_KEY  — from https://www.google.com/recaptcha/admin
+#        RESEND_API_KEY        — from https://resend.com
+#        NOTIFY_FROM_EMAIL     — the "from" address Resend sends as (must be a verified domain/sender in Resend)
+#        NOTIFY_TO_EMAIL       — Patricia's inbox
+#   4. Also put the reCAPTCHA *site* key (the public one) into
+#      RECAPTCHA_SITE_KEY near the top of script.js — that one is safe to
+#      commit, unlike the secret key above.
+#   5. First login to /admin.html will show every price field empty (KV
+#      hasn't been seeded yet) — fill in the current values from CONFIG in
+#      script.js and hit Save once to seed it.
+#   6. Bindings added via the dashboard on a Git-connected project may show
+#      a banner asking you to copy them into this file too — once you have
+#      the real KV namespace id, update it below and commit, so local/CLI
+#      deploys stay in sync with the dashboard-configured ones.
+
+name = "gleamly-estimator"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+[assets]
+directory = "."
+binding = "ASSETS"
+
+[[kv_namespaces]]
+binding = "PRICING_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[[r2_buckets]]
+binding = "PHOTOS_BUCKET"
+bucket_name = "gleamly-quote-photos"
+
+[triggers]
+crons = ["0 3 * * *"]

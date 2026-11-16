@@ -7,9 +7,13 @@
 
 // -------------------------------
 // Site configuration
-// Every number or list Gleamly might want to change lives here. There is no
-// in-browser admin panel — to change a price, the postcode service area, or
-// where quote requests are sent, edit the values below and redeploy.
+// Every number here is the bundled default, used until the live pricing
+// store responds (see the fetch('/api/pricing') call near the bottom of
+// this file) and as the fallback if it ever doesn't. The actual prices
+// customers see are editable at /admin.html (password-protected — see
+// functions/api/admin/) without needing a redeploy. The postcode service
+// area and where quote requests are sent are not exposed there and still
+// need a source edit + redeploy.
 // -------------------------------
 
 const CONFIG = {
@@ -66,11 +70,16 @@ const CONFIG = {
     }
 };
 
-// Get a free access key at https://web3forms.com (just an email address,
-// no account needed) and paste it here before going live. Until then, quote
-// requests are still saved to this browser's localStorage as a backup, but
-// will not reach Gleamly anywhere else — see submitToWeb3Forms() below.
-const WEB3FORMS_ACCESS_KEY = 'YOUR_WEB3FORMS_ACCESS_KEY';
+// Quote requests are posted to the Cloudflare Pages Function at
+// /api/submit-quote (see functions/api/submit-quote.js), which verifies
+// reCAPTCHA server-side, re-validates and stores any photos, and emails
+// Gleamly. A local backup is still kept in this browser's localStorage in
+// case the network request fails.
+//
+// Paste the live Google reCAPTCHA v2 site key here before going live — get
+// one at https://www.google.com/recaptcha/admin. The matching secret key is
+// a server-side secret in the Cloudflare project and must never go here.
+const RECAPTCHA_SITE_KEY = 'YOUR_RECAPTCHA_SITE_KEY';
 
 // -------------------------------
 // Deep-linking a specific service (e.g. a dedicated Restore landing page's
@@ -198,7 +207,37 @@ let state = freshState();
 let stepHistory = ['postcode'];
 let analyticsFlags = {};
 let editMode = false;
+let isSubmitting = false;
 let selectedPhotos = [];
+let selectedPhotoUrls = [];
+let recaptchaWidgetId = null;
+
+function renderRecaptchaWidget(retriesLeft){
+    const container = document.getElementById('recaptchaContainer');
+    if(!container) return;
+    if(typeof grecaptcha === 'undefined' || !grecaptcha.render){
+        if(retriesLeft === undefined) retriesLeft = 20;
+        if(retriesLeft > 0) setTimeout(() => renderRecaptchaWidget(retriesLeft - 1), 300);
+        return;
+    }
+    if(RECAPTCHA_SITE_KEY === 'YOUR_RECAPTCHA_SITE_KEY'){
+        container.innerHTML = '<p class="hint">reCAPTCHA is not yet configured for this site.</p>';
+        return;
+    }
+    recaptchaWidgetId = grecaptcha.render(container, { sitekey: RECAPTCHA_SITE_KEY });
+}
+
+function currentRecaptchaResponse(){
+    if(typeof grecaptcha === 'undefined' || recaptchaWidgetId === null) return '';
+    try{ return grecaptcha.getResponse(recaptchaWidgetId) || ''; }
+    catch(e){ return ''; }
+}
+
+function resetRecaptcha(){
+    if(typeof grecaptcha !== 'undefined' && recaptchaWidgetId !== null){
+        try{ grecaptcha.reset(recaptchaWidgetId); }catch(e){ /* ignore */ }
+    }
+}
 
 function getStateValue(path){ return getByPath(state, path); }
 function setStateValue(path, value){ setByPath(state, path, value); }
@@ -336,15 +375,15 @@ function track(name, data){
 
 function fireStepAnalytics(key){
     if(key === 'service' && !analyticsFlags.started){
-        track('estimator_started');
+        track('estimator_start');
         analyticsFlags.started = true;
     }
     if((key === 'estimate' || key === 'bespoke') && !analyticsFlags.estimateShown){
-        track('estimate_displayed', { service: state.service, bespoke: key === 'bespoke' });
+        track('estimate_display', { service: state.service, bespoke: key === 'bespoke' });
         analyticsFlags.estimateShown = true;
     }
     if(key === 'stage2' && !analyticsFlags.stage2Started){
-        track('stage2_started');
+        track('stage_2_start');
         analyticsFlags.stage2Started = true;
     }
 }
@@ -427,13 +466,35 @@ function logoIcon(){
 // Photo uploads (final quote stage)
 // -------------------------------
 
+const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+const PHOTO_MAX_COUNT = 10;
+const PHOTO_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'];
+const PHOTO_ALLOWED_EXT = /\.(jpe?g|png|heic|heif|webp)$/i;
+
+function isAllowedPhoto(file){
+    if(file.type) return PHOTO_ALLOWED_TYPES.includes(file.type.toLowerCase());
+    return PHOTO_ALLOWED_EXT.test(file.name || '');
+}
+
 function renderPhotoPreview(){
     if(!selectedPhotos.length) return '';
-    return selectedPhotos.map(f => `<div class="photo-thumb"><img src="${URL.createObjectURL(f)}" alt="${escapeHTML(f.name)}"></div>`).join('');
+    return selectedPhotos.map((f, i) => `
+        <div class="photo-thumb">
+            <img src="${selectedPhotoUrls[i]}" alt="${escapeHTML(f.name)}">
+            <button type="button" class="photo-remove" data-action="remove-photo" data-index="${i}" aria-label="Remove photo">&times;</button>
+        </div>
+    `).join('');
 }
 function renderPhotoPreviewInto(){
     const el = stepContainer.querySelector('#photoPreview');
     if(el) el.innerHTML = renderPhotoPreview();
+}
+function removePhoto(index){
+    const url = selectedPhotoUrls[index];
+    if(url) URL.revokeObjectURL(url);
+    selectedPhotos.splice(index, 1);
+    selectedPhotoUrls.splice(index, 1);
+    renderPhotoPreviewInto();
 }
 
 function textareaField(path, label){
@@ -690,18 +751,22 @@ const TEMPLATES = {
         <div class="form-group">
             <label class="checkbox-row"><input type="checkbox" data-path="generalEnquiry.consent" ${state.generalEnquiry.consent ? 'checked' : ''}><span>I agree to Gleamly contacting me about this enquiry using the details above.</span></label>
         </div>
+        <div class="form-group">
+            <div id="recaptchaContainer"></div>
+        </div>
+        <p class="hint" id="submitStatus" style="text-align:center;" hidden>Sending your enquiry…</p>
         <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Send my enquiry</button></div>
     `,
 
     restoreAreas: () => `
         <h2>Which areas need cleaning?</h2>
         <div class="form-errors" id="formErrors" hidden></div>
-        ${counterRow('restoreAreas.bedroom', `Bedroom <span class="hint">£${CONFIG.restore.bedroom} each</span>`)}
-        ${counterRow('restoreAreas.living', `Living room <span class="hint">£${CONFIG.restore.living} each</span>`)}
-        ${counterRow('restoreAreas.dining', `Dining room <span class="hint">£${CONFIG.restore.dining} each</span>`)}
-        ${counterRow('restoreAreas.hallway', `Hallway <span class="hint">£${CONFIG.restore.hallway} each</span>`)}
-        ${counterRow('restoreAreas.landing', `Landing <span class="hint">£${CONFIG.restore.landing} each</span>`)}
-        ${numberField('restoreAreas.stairsSteps', 'Stairs — number of steps', { min: 0, max: 60, hint: `First ${CONFIG.restore.stairsBaseSteps} steps £${CONFIG.restore.stairsBase}, then £${CONFIG.restore.additionalStairEach} per extra step.` })}
+        ${counterRow('restoreAreas.bedroom', 'Bedroom')}
+        ${counterRow('restoreAreas.living', 'Living room')}
+        ${counterRow('restoreAreas.dining', 'Dining room')}
+        ${counterRow('restoreAreas.hallway', 'Hallway')}
+        ${counterRow('restoreAreas.landing', 'Landing')}
+        ${numberField('restoreAreas.stairsSteps', 'Stairs — number of steps', { min: 0, max: 60 })}
         <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Continue</button></div>
     `,
 
@@ -804,7 +869,7 @@ const TEMPLATES = {
         <div class="form-group">
             <label>Photos (optional)</label>
             <input type="file" id="stage2PhotoInput" accept="image/*" multiple>
-            <span class="hint">Add photos from your camera or photo gallery — you can select more than one.</span>
+            <span class="hint">Add photos from your camera or photo gallery — you can select more than one. JPEG, PNG, HEIC or WebP, up to 5MB each, 10 photos maximum.</span>
             <div class="photo-preview" id="photoPreview">${renderPhotoPreview()}</div>
         </div>
 
@@ -813,6 +878,11 @@ const TEMPLATES = {
             <label class="checkbox-row"><input type="checkbox" data-path="stage2.consent" ${state.stage2.consent ? 'checked' : ''}><span>I agree to Gleamly contacting me about this enquiry using the details above.</span></label>
         </div>
 
+        <div class="form-group">
+            <div id="recaptchaContainer"></div>
+        </div>
+
+        <p class="hint" id="submitStatus" style="text-align:center;" hidden>Sending your request…</p>
         <div class="buttons"><button class="back" data-action="back">Back</button><button class="next" data-action="next">Send my request</button></div>
     `,
 
@@ -855,9 +925,10 @@ function nextStepKey(key){
 }
 
 // -------------------------------
-// Submission (brief: Tally was considered, but a secret API key can never
-// live in public page source — Web3Forms is built for exactly this, a
-// public-safe access key posted straight from client-side JS, no backend)
+// Submission — posted to the Cloudflare Pages Function at /api/submit-quote
+// (see functions/api/submit-quote.js), which verifies reCAPTCHA server-side,
+// re-validates and stores any photos, and emails Gleamly. A local backup is
+// kept in case the network request fails before it can be confirmed.
 // -------------------------------
 
 function persistEnquiryLocally(record){
@@ -868,27 +939,29 @@ function persistEnquiryLocally(record){
     }catch(e){ /* storage unavailable — submission still attempted below */ }
 }
 
-function submitToWeb3Forms(record, files){
-    if(WEB3FORMS_ACCESS_KEY === 'YOUR_WEB3FORMS_ACCESS_KEY'){
-        console.warn('[Gleamly] WEB3FORMS_ACCESS_KEY is not set — this submission was only saved to localStorage and will not reach Gleamly. Get a free key at https://web3forms.com and paste it into script.js.');
-        return;
-    }
+async function submitToBackend(record, files){
     const formData = new FormData();
-    formData.append('access_key', WEB3FORMS_ACCESS_KEY);
-    formData.append('subject', `New Gleamly ${record.type === 'general_enquiry' ? 'general enquiry' : 'quote request'} — ${record.id}`);
-    formData.append('from_name', 'Gleamly Instant Estimate');
-    formData.append('message', JSON.stringify(record, null, 2));
-    (files || []).forEach((f, i) => formData.append(`attachment_${i + 1}`, f, f.name));
+    formData.append('record', JSON.stringify(record));
+    formData.append('g-recaptcha-response', currentRecaptchaResponse());
+    (files || []).forEach(f => formData.append('photos', f, f.name));
 
-    fetch('https://api.web3forms.com/submit', { method: 'POST', body: formData })
-        .then(r => r.json())
-        .then(data => { if(!data.success) console.error('[Gleamly] Web3Forms submission failed:', data); })
-        .catch(err => console.error('[Gleamly] Web3Forms submission error:', err));
+    let res;
+    try{
+        res = await fetch('/api/submit-quote', { method: 'POST', body: formData });
+    }catch(e){
+        throw new Error('We could not reach the server. Please check your connection and try again.');
+    }
+
+    let data = null;
+    try{ data = await res.json(); }catch(e){ /* non-JSON error response */ }
+
+    if(!res.ok || !data || !data.success){
+        throw new Error((data && data.error) || 'We could not send your request. Please try again.');
+    }
 }
 
-function submitEnquiryRecord(){
+async function submitEnquiryRecord(){
     const id = 'GLM-' + Date.now().toString(36).toUpperCase();
-    state.lastEnquiryId = id;
 
     const record = {
         id,
@@ -922,15 +995,14 @@ function submitEnquiryRecord(){
     };
 
     persistEnquiryLocally(record);
-    submitToWeb3Forms(record, selectedPhotos);
+    await submitToBackend(record, selectedPhotos);
 
-    console.log('New Gleamly enquiry received:', record);
-    track('final_quote_submitted', { service: state.service, id });
+    state.lastEnquiryId = id;
+    track('final_quote_submission', { service: state.service, id });
 }
 
-function submitGeneralEnquiry(){
+async function submitGeneralEnquiry(){
     const id = 'GLM-' + Date.now().toString(36).toUpperCase();
-    state.lastEnquiryId = id;
 
     const record = {
         id,
@@ -944,9 +1016,9 @@ function submitGeneralEnquiry(){
     };
 
     persistEnquiryLocally(record);
-    submitToWeb3Forms(record, []);
+    await submitToBackend(record, []);
 
-    console.log('New Gleamly general enquiry received:', record);
+    state.lastEnquiryId = id;
     track('general_enquiry_submitted', { id });
 }
 
@@ -967,12 +1039,6 @@ function handleSideEffects(key){
     }
     if(key === 'restoreConcern'){
         computeRestoreEstimate();
-    }
-    if(key === 'stage2'){
-        submitEnquiryRecord();
-    }
-    if(key === 'generalEnquiry'){
-        submitGeneralEnquiry();
     }
 }
 
@@ -1021,6 +1087,7 @@ function validateGeneralEnquiry(){
     if(!g.mobile || !/^[0-9+()\-\s]{7,20}$/.test(g.mobile.trim())) errors.push('Please enter a valid mobile number.');
     if(!g.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(g.email.trim())) errors.push('Please enter a valid email address.');
     if(!g.consent) errors.push('Please confirm you agree to be contacted about this enquiry.');
+    if(RECAPTCHA_SITE_KEY !== 'YOUR_RECAPTCHA_SITE_KEY' && !currentRecaptchaResponse()) errors.push('Please confirm you are not a robot.');
     return { valid: errors.length === 0, errors };
 }
 
@@ -1037,6 +1104,7 @@ function validateStage2(){
     if(!s.accessType) errors.push('Please select the access details.');
     if(!s.parking) errors.push('Please select the parking option.');
     if(!s.consent) errors.push('Please confirm you agree to be contacted about this enquiry.');
+    if(RECAPTCHA_SITE_KEY !== 'YOUR_RECAPTCHA_SITE_KEY' && !currentRecaptchaResponse()) errors.push('Please confirm you are not a robot.');
     return { valid: errors.length === 0, errors };
 }
 
@@ -1053,6 +1121,7 @@ function renderCurrent(){
     stepContainer.innerHTML = TEMPLATES[key]();
     updateProgress(key);
     fireStepAnalytics(key);
+    renderRecaptchaWidget();
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1090,7 +1159,10 @@ function restart(){
     stepHistory = ['postcode'];
     analyticsFlags = {};
     editMode = false;
+    selectedPhotoUrls.forEach(url => URL.revokeObjectURL(url));
     selectedPhotos = [];
+    selectedPhotoUrls = [];
+    recaptchaWidgetId = null;
     renderCurrent();
 }
 
@@ -1120,6 +1192,32 @@ function editAnswer(step){
     goTo(step);
 }
 
+function setSubmittingUI(isOn){
+    const btn = stepContainer.querySelector('[data-action="next"]');
+    if(btn) btn.disabled = isOn;
+    const backBtn = stepContainer.querySelector('[data-action="back"]');
+    if(backBtn) backBtn.disabled = isOn;
+    const status = document.getElementById('submitStatus');
+    if(status) status.hidden = !isOn;
+}
+
+async function submitAndAdvance(key){
+    if(isSubmitting) return;
+    isSubmitting = true;
+    setSubmittingUI(true);
+    try{
+        if(key === 'stage2') await submitEnquiryRecord();
+        else await submitGeneralEnquiry();
+        isSubmitting = false;
+        goTo('confirmation');
+    }catch(err){
+        isSubmitting = false;
+        setSubmittingUI(false);
+        resetRecaptcha();
+        showErrors([(err && err.message) || 'Something went wrong sending your request. Please try again.']);
+    }
+}
+
 function attemptAdvance(){
     const key = currentStepKey();
     const result = validateStep(key);
@@ -1128,6 +1226,12 @@ function attemptAdvance(){
         return;
     }
     hideErrors();
+
+    if(key === 'stage2' || key === 'generalEnquiry'){
+        submitAndAdvance(key);
+        return;
+    }
+
     handleSideEffects(key);
 
     if(editMode){
@@ -1179,6 +1283,9 @@ function handleContainerClick(e){
     const editBtn = e.target.closest('[data-action="edit-answer"]');
     if(editBtn){ editAnswer(editBtn.dataset.targetStep); return; }
 
+    const removePhotoBtn = e.target.closest('[data-action="remove-photo"]');
+    if(removePhotoBtn){ removePhoto(Number(removePhotoBtn.dataset.index)); return; }
+
     const pcCheck = e.target.closest('[data-action="postcode-check"]');
     if(pcCheck){ handlePostcodeCheck(); return; }
 
@@ -1216,7 +1323,27 @@ function handleFieldSync(e){
     const t = e.target;
 
     if(t.id === 'stage2PhotoInput'){
-        Array.from(t.files || []).forEach(f => selectedPhotos.push(f));
+        if(e.type !== 'change') return; // file inputs fire both 'input' and 'change' — handle once
+        const incoming = Array.from(t.files || []);
+        const errors = [];
+        for(const f of incoming){
+            if(selectedPhotos.length >= PHOTO_MAX_COUNT){
+                errors.push(`You can attach up to ${PHOTO_MAX_COUNT} photos.`);
+                break;
+            }
+            if(!isAllowedPhoto(f)){
+                errors.push(`${f.name} isn't a supported photo format. Use JPEG, PNG, HEIC or WebP.`);
+                continue;
+            }
+            if(f.size > PHOTO_MAX_BYTES){
+                errors.push(`${f.name} is over the 5MB limit.`);
+                continue;
+            }
+            selectedPhotos.push(f);
+            selectedPhotoUrls.push(URL.createObjectURL(f));
+        }
+        t.value = '';
+        if(errors.length) showErrors(errors); else hideErrors();
         renderPhotoPreviewInto();
         return;
     }
@@ -1263,3 +1390,32 @@ stepContainer.addEventListener('change', handleFieldSync);
 // -------------------------------
 
 renderCurrent();
+
+// Progressive enhancement: refresh CONFIG from the live pricing store once
+// it's available (see functions/api/pricing.js). If this fails — offline,
+// or the backend isn't deployed yet — the bundled defaults above keep the
+// estimator fully working on their own.
+function applyRemotePricing(remote){
+    if(!remote || typeof remote !== 'object') return;
+    (function merge(target, source){
+        Object.keys(source).forEach(k => {
+            if(source[k] && typeof source[k] === 'object' && !Array.isArray(source[k])){
+                if(!target[k] || typeof target[k] !== 'object') target[k] = {};
+                merge(target[k], source[k]);
+            } else {
+                target[k] = source[k];
+            }
+        });
+    })(CONFIG, remote);
+}
+
+fetch('/api/pricing')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+        if(!data) return;
+        applyRemotePricing(data);
+        if(state.service === 'restore' && state.restoreEstimate !== null) computeRestoreEstimate();
+        else if(state.service && state.service !== 'restore' && state.estimate && !state.bespokeReason) computeEstimate();
+        renderCurrent();
+    })
+    .catch(() => { /* keep bundled defaults */ });

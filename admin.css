@@ -1,0 +1,60 @@
+/* ===========================
+   Pricing admin — reuses index.css for fonts, container, wizard, buttons,
+   form-group and form-errors so it stays visually consistent with the
+   customer-facing estimator. These rules only add what's specific to the
+   admin editing UI.
+=========================== */
+
+.admin-wizard{
+    max-width:640px;
+}
+
+.admin-section{
+    margin:24px 0 0;
+    padding-top:16px;
+    border-top:1px solid #E2E8F0;
+}
+.admin-section:first-child{
+    border-top:none;
+    padding-top:0;
+    margin-top:0;
+}
+
+.admin-section h4{
+    margin:0 0 12px;
+    font-size:13px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    color:#1e3a5f;
+}
+
+.admin-field{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:10px;
+}
+
+.admin-field label{
+    flex:1;
+    font-size:14px;
+    color:#334155;
+}
+
+.admin-field input{
+    width:110px;
+    padding:8px 10px;
+    border:1px solid #CBD5E1;
+    border-radius:8px;
+    font-size:14px;
+    text-align:right;
+    font-family:inherit;
+}
+
+.admin-save-ok{
+    text-align:center;
+    color:#16a34a;
+    font-weight:500;
+}

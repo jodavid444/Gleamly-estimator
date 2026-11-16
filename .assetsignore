@@ -1,0 +1,8 @@
+src
+wrangler.toml
+.assetsignore
+.git
+.gitignore
+.claude
+node_modules
+.DS_Store
