@@ -41,6 +41,7 @@ main = "src/worker.js"
 compatibility_date = "2026-01-01"
 
 [assets]
+# Serves everything in the repo root except what .assetsignore excludes.
 directory = "."
 binding = "ASSETS"
 
