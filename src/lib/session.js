@@ -1,6 +1,5 @@
 // Shared helpers for the admin session cookie. Used by
-// src/routes/admin-login.js, src/routes/admin-pricing.js and
-// src/routes/admin-photo.js.
+// src/routes/admin-login.js and src/routes/admin-pricing.js.
 //
 // The session is a signed, short-lived token: "<expiryMs>.<hmacSignature>".
 // Signing uses the ADMIN_SESSION_SECRET Cloudflare secret, which never
