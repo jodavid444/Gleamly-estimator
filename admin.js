@@ -122,13 +122,23 @@ function renderLogin(errorMsg){
         ${errorMsg ? `<div class="form-errors"><ul><li>${escapeHTML(errorMsg)}</li></ul></div>` : ''}
         <div class="form-group">
             <label>Password</label>
-            <input type="password" id="adminPassword" autocomplete="current-password">
+            <div style="display:flex; gap:8px;">
+                <input type="password" id="adminPassword" autocomplete="current-password" style="flex:1;">
+                <button type="button" id="togglePassword">Show</button>
+            </div>
         </div>
         <div class="buttons"><button class="next" id="loginBtn" type="button">Log in</button></div>
     `;
     document.getElementById('loginBtn').addEventListener('click', handleLogin);
     document.getElementById('adminPassword').addEventListener('keydown', e => {
         if(e.key === 'Enter') handleLogin();
+    });
+    document.getElementById('togglePassword').addEventListener('click', () => {
+        const input = document.getElementById('adminPassword');
+        const btn = document.getElementById('togglePassword');
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.textContent = show ? 'Hide' : 'Show';
     });
     document.getElementById('adminPassword').focus();
 }
