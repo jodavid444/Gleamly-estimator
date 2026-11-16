@@ -17,24 +17,28 @@
 #   1. Create a KV namespace (dashboard: project -> Settings -> Bindings ->
 #      Add binding -> KV namespace -> Create new), bind it with variable
 #      name PRICING_KV, and put its id below in place of the placeholder.
-#   2. Set these as Worker secrets (dashboard -> Settings -> Variables and
-#      Secrets, or `wrangler secret put <NAME>`):
-#        ADMIN_PASSWORD        — the password Patricia logs into /admin.html with
-#        ADMIN_SESSION_SECRET  — any long random string, used to sign session cookies
+#   2. ADMIN_PASSWORD and ADMIN_SESSION_SECRET are declared below as
+#      Secrets Store bindings — every value lives in the account's Secrets
+#      Store (dashboard search -> "Secrets Store"), never in this file.
+#      This project is Git-connected, so every push runs `wrangler deploy`
+#      fresh from this file alone — any binding added only through the
+#      dashboard's "Add binding" UI gets silently dropped on the next push
+#      unless it's also declared here. That's what caused the admin login
+#      to keep failing: the binding existed in the dashboard but not here.
+#   3. Still need to set these as plain Worker secrets (dashboard ->
+#      Settings -> Builds -> ...no, see note below -> or `wrangler secret
+#      put <NAME>` locally, or as their own Secrets Store entries declared
+#      below the same way as ADMIN_PASSWORD):
 #        RECAPTCHA_SECRET_KEY  — from https://www.google.com/recaptcha/admin
 #        RESEND_API_KEY        — from https://resend.com
 #        NOTIFY_FROM_EMAIL     — the "from" address Resend sends as (must be a verified domain/sender in Resend)
 #        NOTIFY_TO_EMAIL       — Patricia's inbox
-#   3. Also put the reCAPTCHA *site* key (the public one) into
+#   4. Also put the reCAPTCHA *site* key (the public one) into
 #      RECAPTCHA_SITE_KEY near the top of script.js — that one is safe to
 #      commit, unlike the secret key above.
-#   4. First login to /admin.html will show every price field empty (KV
+#   5. First login to /admin.html will show every price field empty (KV
 #      hasn't been seeded yet) — fill in the current values from CONFIG in
 #      script.js and hit Save once to seed it.
-#   5. Bindings added via the dashboard on a Git-connected project may show
-#      a banner asking you to copy them into this file too — once you have
-#      the real KV namespace id, update it below and commit, so local/CLI
-#      deploys stay in sync with the dashboard-configured ones.
 
 name = "gleamly-estimator"
 main = "src/worker.js"
@@ -48,3 +52,13 @@ binding = "ASSETS"
 [[kv_namespaces]]
 binding = "PRICING_KV"
 id = "0ec5548c5f5744d8a86185fb81457c48"
+
+[[secrets_store_secrets]]
+binding = "ADMIN_PASSWORD"
+store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
+secret_name = "admin-password"
+
+[[secrets_store_secrets]]
+binding = "ADMIN_SESSION_SECRET"
+store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
+secret_name = "admin-session-secret"
