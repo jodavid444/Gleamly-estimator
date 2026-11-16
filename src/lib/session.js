@@ -45,7 +45,18 @@ export function getCookie(request, name){
     return match ? decodeURIComponent(match[1]) : null;
 }
 
+// Secrets Store bindings expose their value via an async .get() rather than
+// as a plain string (unlike classic `wrangler secret put` bindings) — this
+// works with either kind.
+export async function resolveSecret(binding){
+    if(!binding) return null;
+    if(typeof binding === 'string') return binding;
+    if(typeof binding.get === 'function') return binding.get();
+    return null;
+}
+
 export async function requireAdminSession(request, env){
     const token = getCookie(request, 'admin_session');
-    return verifySessionToken(env.ADMIN_SESSION_SECRET, token);
+    const secret = await resolveSecret(env.ADMIN_SESSION_SECRET);
+    return verifySessionToken(secret, token);
 }
