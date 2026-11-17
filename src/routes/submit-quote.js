@@ -18,6 +18,8 @@
 // attach as many as fit and say so in the email so Patricia knows to ask
 // the customer to resend the rest directly.
 
+import { resolveSecret } from '../lib/session.js';
+
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'];
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 10;
@@ -75,7 +77,8 @@ export async function handleSubmitQuote(request, env){
     }
 
     const recaptchaToken = form.get('g-recaptcha-response');
-    const recaptchaOk = await verifyRecaptcha(recaptchaToken, env.RECAPTCHA_SECRET_KEY);
+    const recaptchaSecret = await resolveSecret(env.RECAPTCHA_SECRET_KEY);
+    const recaptchaOk = await verifyRecaptcha(recaptchaToken, recaptchaSecret);
     if(!recaptchaOk){
         return jsonError('CAPTCHA verification failed. Please try again.');
     }
@@ -122,15 +125,19 @@ export async function handleSubmitQuote(request, env){
         attachedBytes += file.size;
     }
 
+    const resendApiKey = await resolveSecret(env.RESEND_API_KEY);
+    const notifyFrom = await resolveSecret(env.NOTIFY_FROM_EMAIL);
+    const notifyTo = await resolveSecret(env.NOTIFY_TO_EMAIL);
+
     const emailRes = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+            'Authorization': `Bearer ${resendApiKey}`,
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            from: env.NOTIFY_FROM_EMAIL,
-            to: env.NOTIFY_TO_EMAIL,
+            from: notifyFrom,
+            to: notifyTo,
             subject: `New Gleamly ${record.type === 'general_enquiry' ? 'enquiry' : 'quote request'} — ${record.id}`,
             text: buildEmailText(record, files.length, omittedCount),
             attachments: attachments.length ? attachments : undefined
