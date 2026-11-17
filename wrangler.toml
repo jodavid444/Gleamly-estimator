@@ -66,3 +66,4 @@ secret_name = "admin-session-secret"
 binding = "RECAPTCHA_SECRET_KEY"
 store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
 secret_name = "recaptcha-secret-key"
+# (redeploy trigger)
