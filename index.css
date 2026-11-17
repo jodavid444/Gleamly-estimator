@@ -111,6 +111,9 @@ p{
     font-size:12px;
     margin-top:6px;
 }
+.hint[hidden]{
+    display:none;
+}
 
 /* ===========================
 ICON
