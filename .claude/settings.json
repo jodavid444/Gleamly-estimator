@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s https://gleamly-estimator.josephdavid4002.workers.dev/api/pricing)",
+      "Bash(env)",
+      "Bash(npx --yes wrangler --version)",
+      "Bash(curl -s https://gleamly-estimator.josephdavid4002.workers.dev/ -o /dev/null -w \"homepage: %{http_code}\\\\n\")",
+      "Bash(curl -s -I https://gleamly-estimator.josephdavid4002.workers.dev/index.html)"
+    ]
+  }
+}
