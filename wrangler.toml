@@ -25,11 +25,10 @@
 #      dashboard's "Add binding" UI gets silently dropped on the next push
 #      unless it's also declared here. That's what caused the admin login
 #      to keep failing: the binding existed in the dashboard but not here.
-#   3. Still need to set these as plain Worker secrets (dashboard ->
-#      Settings -> Builds -> ...no, see note below -> or `wrangler secret
-#      put <NAME>` locally, or as their own Secrets Store entries declared
-#      below the same way as ADMIN_PASSWORD):
-#        RECAPTCHA_SECRET_KEY  — from https://www.google.com/recaptcha/admin
+#   3. RECAPTCHA_SECRET_KEY is declared below the same way. Still need to
+#      set these the same way (create the Secrets Store entry, then add
+#      the binding in the dashboard once so Cloudflare links it — after
+#      that this file keeps it alive across deploys):
 #        RESEND_API_KEY        — from https://resend.com
 #        NOTIFY_FROM_EMAIL     — the "from" address Resend sends as (must be a verified domain/sender in Resend)
 #        NOTIFY_TO_EMAIL       — Patricia's inbox
@@ -62,3 +61,8 @@ secret_name = "admin-password"
 binding = "ADMIN_SESSION_SECRET"
 store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
 secret_name = "admin-session-secret"
+
+[[secrets_store_secrets]]
+binding = "RECAPTCHA_SECRET_KEY"
+store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
+secret_name = "recaptcha-secret-key"

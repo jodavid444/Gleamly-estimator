@@ -79,7 +79,7 @@ const CONFIG = {
 // Paste the live Google reCAPTCHA v2 site key here before going live — get
 // one at https://www.google.com/recaptcha/admin. The matching secret key is
 // a server-side secret in the Cloudflare project and must never go here.
-const RECAPTCHA_SITE_KEY = 'YOUR_RECAPTCHA_SITE_KEY';
+const RECAPTCHA_SITE_KEY = '6LcO1yQuAAAAALGfEieb01RVd1_VehjIgIy0B8O8';
 
 // -------------------------------
 // Deep-linking a specific service (e.g. a dedicated Restore landing page's
