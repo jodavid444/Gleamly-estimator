@@ -19,6 +19,7 @@
 // the customer to resend the rest directly.
 
 import { resolveSecret } from '../lib/session.js';
+import { buildEmailHtml } from './email-template.js';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'];
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -128,6 +129,7 @@ export async function handleSubmitQuote(request, env){
     const resendApiKey = await resolveSecret(env.RESEND_API_KEY);
     const notifyFrom = await resolveSecret(env.NOTIFY_FROM_EMAIL);
     const notifyTo = await resolveSecret(env.NOTIFY_TO_EMAIL);
+    const photoFilenames = files.map(f => f.name || 'photo.jpg');
 
     const emailRes = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -140,6 +142,7 @@ export async function handleSubmitQuote(request, env){
             to: notifyTo,
             subject: `New Gleamly ${record.type === 'general_enquiry' ? 'enquiry' : 'quote request'} — ${record.id}`,
             text: buildEmailText(record, files.length, omittedCount),
+            html: buildEmailHtml(record, photoFilenames, omittedCount),
             attachments: attachments.length ? attachments : undefined
         })
     }).catch(() => null);
