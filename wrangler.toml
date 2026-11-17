@@ -25,19 +25,18 @@
 #      dashboard's "Add binding" UI gets silently dropped on the next push
 #      unless it's also declared here. That's what caused the admin login
 #      to keep failing: the binding existed in the dashboard but not here.
-#   3. RECAPTCHA_SECRET_KEY is declared below the same way. Still need to
-#      set these the same way (create the Secrets Store entry, then add
-#      the binding in the dashboard once so Cloudflare links it — after
-#      that this file keeps it alive across deploys):
-#        RESEND_API_KEY        — from https://resend.com
-#        NOTIFY_FROM_EMAIL     — the "from" address Resend sends as (must be a verified domain/sender in Resend)
-#        NOTIFY_TO_EMAIL       — Patricia's inbox
+#   3. RECAPTCHA_SECRET_KEY, RESEND_API_KEY, NOTIFY_FROM_EMAIL and
+#      NOTIFY_TO_EMAIL are all declared below the same way.
 #   4. Also put the reCAPTCHA *site* key (the public one) into
 #      RECAPTCHA_SITE_KEY near the top of script.js — that one is safe to
 #      commit, unlike the secret key above.
 #   5. First login to /admin.html will show every price field empty (KV
 #      hasn't been seeded yet) — fill in the current values from CONFIG in
 #      script.js and hit Save once to seed it.
+#   6. NOTIFY_FROM_EMAIL currently uses Resend's shared test domain
+#      (onboarding@resend.dev), which can only send to the email address
+#      the Resend account was signed up with. Swap it for a verified
+#      domain address before going live so it can email Patricia directly.
 
 name = "gleamly-estimator"
 main = "src/worker.js"
@@ -66,4 +65,18 @@ secret_name = "admin-session-secret"
 binding = "RECAPTCHA_SECRET_KEY"
 store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
 secret_name = "recaptcha-secret-key"
-# (redeploy trigger)
+
+[[secrets_store_secrets]]
+binding = "RESEND_API_KEY"
+store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
+secret_name = "resend-api-key"
+
+[[secrets_store_secrets]]
+binding = "NOTIFY_FROM_EMAIL"
+store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
+secret_name = "notify-from-email"
+
+[[secrets_store_secrets]]
+binding = "NOTIFY_TO_EMAIL"
+store_id = "d2a4c4f02cf74c9dbf2f14bd0f098808"
+secret_name = "notify-to-email"
